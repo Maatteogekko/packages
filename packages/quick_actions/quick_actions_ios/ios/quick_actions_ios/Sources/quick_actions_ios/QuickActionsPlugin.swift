@@ -90,8 +90,13 @@ public final class QuickActionsPlugin: NSObject, FlutterPlugin, IOSQuickActionsA
     -> UIApplicationShortcutItem?
   {
 
-    let icon = (shortcut.icon).map {
-      UIApplicationShortcutIcon(templateImageName: $0)
+    let icon = (shortcut.icon).map { iconName in
+      if iconName.hasPrefix("symbol:") {
+        let systemImageName = String(iconName.dropFirst("symbol:".count))
+        return UIApplicationShortcutIcon(systemImageName: systemImageName)
+      } else {
+        return UIApplicationShortcutIcon(templateImageName: iconName)
+      }
     }
 
     // type and localizedTitle are required.
