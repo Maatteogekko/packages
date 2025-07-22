@@ -120,6 +120,10 @@ String concatenatePaths(String parentPath, String childPath) {
 Uri concatenateUris(Uri parentUri, Uri childUri) {
   Uri newUri = childUri.replace(
     path: concatenatePaths(parentUri.path, childUri.path),
+    queryParameters: <String, String>{
+      ...parentUri.queryParameters,
+      ...childUri.queryParameters,
+    },
   );
 
   // Parse the new normalized uri to remove unnecessary parts, like the trailing '?'.
