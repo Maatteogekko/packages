@@ -1,4 +1,4 @@
-// Copyright 2013 The Flutter Authors. All rights reserved.
+// Copyright 2013 The Flutter Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -95,6 +95,21 @@ ErrorOr<std::optional<AllNullableTypes>> TestPlugin::EchoAllNullableTypes(
     return std::optional<AllNullableTypes>(std::nullopt);
   }
   return std::optional<AllNullableTypes>(*everything);
+}
+
+ErrorOr<bool> TestPlugin::AreAllNullableTypesEqual(const AllNullableTypes& a,
+                                                   const AllNullableTypes& b) {
+  return a == b;
+}
+
+ErrorOr<int64_t> TestPlugin::GetAllNullableTypesHash(
+    const AllNullableTypes& value) {
+  return (int64_t)value.Hash();
+}
+
+ErrorOr<int64_t> TestPlugin::GetAllNullableTypesWithoutRecursionHash(
+    const AllNullableTypesWithoutRecursion& value) {
+  return (int64_t)value.Hash();
 }
 
 ErrorOr<std::optional<AllNullableTypesWithoutRecursion>>

@@ -1,4 +1,4 @@
-// Copyright 2013 The Flutter Authors. All rights reserved.
+// Copyright 2013 The Flutter Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,15 +8,12 @@ import 'dart:async';
 import 'dart:js_interop';
 import 'dart:ui';
 
-// ignore_for_file: implementation_imports
 import 'package:camera_web/src/camera.dart';
 import 'package:camera_web/src/camera_service.dart';
 import 'package:camera_web/src/shims/dart_js_util.dart';
 import 'package:camera_web/src/types/types.dart';
 import 'package:mockito/annotations.dart';
 import 'package:mockito/mockito.dart';
-// TODO(srujzs): This is exported in `package:web` 0.6.0. Remove this when it is available.
-import 'package:web/src/helpers/events/streams.dart';
 import 'package:web/web.dart' as web;
 
 @GenerateNiceMocks(<MockSpec<dynamic>>[
@@ -80,12 +77,12 @@ class MockScreen {
 
 @JSExport()
 class MockScreenOrientation {
-  /// JSPromise<JSAny?> Function(web.OrientationLockType orientation)
+  /// `JSPromise<JSAny?> Function(web.OrientationLockType orientation)`
   JSFunction lock = (web.OrientationLockType orientation) {
     return Future<void>.value().toJS;
   }.toJS;
 
-  /// void Function()
+  /// `void Function()`
   late JSFunction unlock;
   late web.OrientationType type;
 }
@@ -97,7 +94,7 @@ class MockDocument {
 
 @JSExport()
 class MockElement {
-  /// JSPromise<JSAny?> Function([FullscreenOptions options])
+  /// `JSPromise<JSAny?> Function([FullscreenOptions options])`
   JSFunction requestFullscreen = ([web.FullscreenOptions? options]) {
     return Future<void>.value().toJS;
   }.toJS;
@@ -110,30 +107,30 @@ class MockNavigator {
 
 @JSExport()
 class MockMediaDevices {
-  /// JSPromise<web.MediaStream> Function([web.MediaStreamConstraints? constraints])
+  /// `JSPromise<web.MediaStream> Function([web.MediaStreamConstraints? constraints])`
   late JSFunction getUserMedia;
 
-  /// web.MediaTrackSupportedConstraints Function()
+  /// `web.MediaTrackSupportedConstraints Function()`
   late JSFunction getSupportedConstraints;
 
-  /// JSPromise<JSArray<web.MediaDeviceInfo>> Function()
+  /// `JSPromise<JSArray<web.MediaDeviceInfo>> Function()`
   late JSFunction enumerateDevices;
 }
 
 @JSExport()
 class MockMediaStreamTrack {
-  /// web.MediaTrackCapabilities Function();
+  /// `web.MediaTrackCapabilities Function()`
   late JSFunction getCapabilities;
 
-  /// web.MediaTrackSettings Function()
+  /// `web.MediaTrackSettings Function()`
   JSFunction getSettings = () {
     return web.MediaTrackSettings();
   }.toJS;
 
-  /// JSPromise<JSAny?> Function([web.MediaTrackConstraints? constraints])
+  /// `JSPromise<JSAny?> Function([web.MediaTrackConstraints? constraints])`
   late JSFunction applyConstraints;
 
-  /// void Function()
+  /// `void Function()`
   JSFunction stop = () {}.toJS;
 }
 
@@ -145,24 +142,24 @@ class MockVideoElement {
 
 @JSExport()
 class MockMediaRecorder {
-  /// void Function(String type, web.EventListener? callback, [JSAny options])
+  /// `void Function(String type, web.EventListener? callback, [JSAny options])`
   JSFunction addEventListener =
       (String type, web.EventListener? callback, [JSAny? options]) {}.toJS;
 
-  /// void Function(String type, web.EventListener? callback, [JSAny options])
+  /// `void Function(String type, web.EventListener? callback, [JSAny options])`
   JSFunction removeEventListener =
       (String type, web.EventListener? callback, [JSAny? options]) {}.toJS;
 
-  /// void Function([int timeslice])
+  /// `void Function([int timeslice])`
   JSFunction start = ([int? timeslice]) {}.toJS;
 
-  /// void Function()
+  /// `void Function()`
   JSFunction pause = () {}.toJS;
 
-  /// void Function()
+  /// `void Function()`
   JSFunction resume = () {}.toJS;
 
-  /// void Function()
+  /// `void Function()`
   JSFunction stop = () {}.toJS;
 
   web.RecordingState state = 'inactive';
@@ -191,25 +188,26 @@ class FakeMediaDeviceInfo {
 /// A fake [MediaError] that returns the provided error [_code] and [_message].
 @JSExport()
 class FakeMediaError {
-  FakeMediaError(
-    this.code, [
-    this.message = '',
-  ]);
+  FakeMediaError(this.code, [this.message = '']);
 
   final int code;
   final String message;
 }
 
-/// A fake [ElementStream] that listens to the provided [_stream] on [listen].
+/// A fake [web.ElementStream] that listens to the provided [_stream] on [listen].
 class FakeElementStream<T extends web.Event> extends Fake
-    implements ElementStream<T> {
+    implements web.ElementStream<T> {
   FakeElementStream(this._stream);
 
   final Stream<T> _stream;
 
   @override
-  StreamSubscription<T> listen(void Function(T event)? onData,
-      {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+  StreamSubscription<T> listen(
+    void Function(T event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) {
     return _stream.listen(
       onData,
       onError: onError,
@@ -219,7 +217,7 @@ class FakeElementStream<T extends web.Event> extends Fake
   }
 }
 
-/// A fake [BlobEvent] that returns the provided blob [data].
+/// A fake [web.BlobEvent] that returns the provided blob [data].
 @JSExport()
 class FakeBlobEvent {
   FakeBlobEvent(this.data);
@@ -227,13 +225,10 @@ class FakeBlobEvent {
   final web.Blob? data;
 }
 
-/// A fake [DomException] that returns the provided error [_name] and [_message].
+/// A fake [web.DomException] that returns the provided error [_name] and [_message].
 @JSExport()
 class FakeErrorEvent {
-  FakeErrorEvent(
-    this.type, [
-    this.message = '',
-  ]);
+  FakeErrorEvent(this.type, [this.message = '']);
 
   final String type;
   final String message;
@@ -247,12 +242,12 @@ class FakeErrorEvent {
 /// final videoStream = videoElement.captureStream();
 /// ```
 web.HTMLVideoElement getVideoElementWithBlankStream(Size videoSize) {
-  final web.HTMLCanvasElement canvasElement = web.HTMLCanvasElement()
+  final canvasElement = web.HTMLCanvasElement()
     ..width = videoSize.width.toInt()
     ..height = videoSize.height.toInt()
     ..context2D.fillRect(0, 0, videoSize.width, videoSize.height);
 
-  final web.HTMLVideoElement videoElement = web.HTMLVideoElement()
+  final videoElement = web.HTMLVideoElement()
     ..srcObject = canvasElement.captureStream();
 
   return videoElement;
@@ -261,32 +256,48 @@ web.HTMLVideoElement getVideoElementWithBlankStream(Size videoSize) {
 class MockEventStreamProvider<T extends web.Event> extends Mock
     implements web.EventStreamProvider<T> {
   @override
-  Stream<T> forTarget(
-    web.EventTarget? e, {
-    bool? useCapture = false,
-  }) {
+  Stream<T> forTarget(web.EventTarget? e, {bool? useCapture = false}) {
     return super.noSuchMethod(
-      Invocation.method(
-        #forTarget,
-        <Object?>[e],
-        <Symbol, Object?>{#useCapture: useCapture},
-      ),
-      returnValue: Stream<T>.empty(),
-    ) as Stream<T>;
+          Invocation.method(
+            #forTarget,
+            <Object?>[e],
+            <Symbol, Object?>{#useCapture: useCapture},
+          ),
+          returnValue: Stream<T>.empty(),
+        )
+        as Stream<T>;
   }
 
   @override
-  ElementStream<T> forElement(
-    web.Element? e, {
-    bool? useCapture = false,
-  }) {
+  web.ElementStream<T> forElement(web.Element? e, {bool? useCapture = false}) {
     return super.noSuchMethod(
-      Invocation.method(
-        #forElement,
-        <Object?>[e],
-        <Symbol, Object?>{#useCapture: useCapture},
-      ),
-      returnValue: FakeElementStream<T>(Stream<T>.empty()),
-    ) as ElementStream<T>;
+          Invocation.method(
+            #forElement,
+            <Object?>[e],
+            <Symbol, Object?>{#useCapture: useCapture},
+          ),
+          returnValue: FakeElementStream<T>(Stream<T>.empty()),
+        )
+        as web.ElementStream<T>;
   }
+}
+
+/// A fake [web.MediaTrackCapabilities] where facingMode is null/undefined.
+///
+/// Used to test null-safe handling when the browser doesn't provide
+/// the facingMode capability.
+@JSExport()
+class FakeMediaTrackCapabilities {
+  // Dummy property required by @JSExport
+  bool get dummy => true;
+}
+
+/// A fake [web.MediaTrackSettings] where facingMode is null/undefined.
+///
+/// Used to test null-safe handling when the browser doesn't provide
+/// the facingMode capability.
+@JSExport()
+class FakeMediaTrackSettings {
+  // Dummy property required by @JSExport
+  bool get dummy => true;
 }

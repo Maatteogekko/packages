@@ -1,4 +1,4 @@
-// Copyright 2013 The Flutter Authors. All rights reserved.
+// Copyright 2013 The Flutter Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -9,7 +9,7 @@
 // The updater that drives callbacks to the engine to indicate that a new frame is ready.
 @property(nonatomic) FVPFrameUpdater *frameUpdater;
 // The display link that drives frameUpdater.
-@property(nonatomic) FVPDisplayLink *displayLink;
+@property(nonatomic) NSObject<FVPDisplayLink> *displayLink;
 // The latest buffer obtained from video output. This is stored so that it can be returned from
 // copyPixelBuffer again if nothing new is available, since the engine has undefined behavior when
 // returning NULL.
@@ -28,52 +28,18 @@
 // (e.g., after a seek while paused). If YES, the display link should continue to run until the next
 // frame is successfully provided.
 @property(nonatomic, assign) BOOL waitingForFrame;
-@property(nonatomic, copy) void (^onDisposed)(int64_t);
+
+/// Ensures that the frame updater runs until a frame is rendered, regardless of play/pause state.
+- (void)expectFrame;
 @end
 
 @implementation FVPTextureBasedVideoPlayer
-- (instancetype)initWithAsset:(NSString *)asset
-                 frameUpdater:(FVPFrameUpdater *)frameUpdater
-                  displayLink:(FVPDisplayLink *)displayLink
-                    avFactory:(id<FVPAVFactory>)avFactory
-                 viewProvider:(NSObject<FVPViewProvider> *)viewProvider
-                   onDisposed:(void (^)(int64_t))onDisposed {
-  return [self initWithURL:[NSURL fileURLWithPath:[FVPVideoPlayer absolutePathForAssetName:asset]]
-              frameUpdater:frameUpdater
-               displayLink:displayLink
-               httpHeaders:@{}
-                 avFactory:avFactory
-              viewProvider:viewProvider
-                onDisposed:onDisposed];
-}
 
-- (instancetype)initWithURL:(NSURL *)url
-               frameUpdater:(FVPFrameUpdater *)frameUpdater
-                displayLink:(FVPDisplayLink *)displayLink
-                httpHeaders:(nonnull NSDictionary<NSString *, NSString *> *)headers
-                  avFactory:(id<FVPAVFactory>)avFactory
-               viewProvider:(NSObject<FVPViewProvider> *)viewProvider
-                 onDisposed:(void (^)(int64_t))onDisposed {
-  NSDictionary<NSString *, id> *options = nil;
-  if ([headers count] != 0) {
-    options = @{@"AVURLAssetHTTPHeaderFieldsKey" : headers};
-  }
-  AVURLAsset *urlAsset = [AVURLAsset URLAssetWithURL:url options:options];
-  AVPlayerItem *item = [AVPlayerItem playerItemWithAsset:urlAsset];
-  return [self initWithPlayerItem:item
-                     frameUpdater:frameUpdater
-                      displayLink:displayLink
-                        avFactory:avFactory
-                     viewProvider:viewProvider
-                       onDisposed:onDisposed];
-}
-
-- (instancetype)initWithPlayerItem:(AVPlayerItem *)item
+- (instancetype)initWithPlayerItem:(NSObject<FVPAVPlayerItem> *)item
                       frameUpdater:(FVPFrameUpdater *)frameUpdater
-                       displayLink:(FVPDisplayLink *)displayLink
+                       displayLink:(NSObject<FVPDisplayLink> *)displayLink
                          avFactory:(id<FVPAVFactory>)avFactory
-                      viewProvider:(NSObject<FVPViewProvider> *)viewProvider
-                        onDisposed:(void (^)(int64_t))onDisposed {
+                      viewProvider:(NSObject<FVPViewProvider> *)viewProvider {
   self = [super initWithPlayerItem:item avFactory:avFactory viewProvider:viewProvider];
 
   if (self) {
@@ -81,7 +47,6 @@
     _displayLink = displayLink;
     _frameUpdater.displayLink = _displayLink;
     _selfRefresh = true;
-    _onDisposed = [onDisposed copy];
 
     // This is to fix 2 bugs: 1. blank video for encrypted video streams on iOS 16
     // (https://github.com/flutter/flutter/issues/111457) and 2. swapped width and height for some
@@ -89,7 +54,12 @@
     // invisible AVPlayerLayer is used to overwrite the protection of pixel buffers in those streams
     // for issue #1, and restore the correct width and height for issue #2.
     _playerLayer = [AVPlayerLayer playerLayerWithPlayer:self.player];
-    [viewProvider.view.layer addSublayer:self.playerLayer];
+#if TARGET_OS_IOS
+    CALayer *flutterLayer = viewProvider.viewController.view.layer;
+#else
+    CALayer *flutterLayer = viewProvider.view.layer;
+#endif
+    [flutterLayer addSublayer:self.playerLayer];
   }
   return self;
 }
@@ -100,6 +70,10 @@
 
 - (void)setTextureIdentifier:(int64_t)textureIdentifier {
   self.frameUpdater.textureIdentifier = textureIdentifier;
+
+  // Ensure that the first frame is drawn once available, even if the video isn't played, since
+  // the engine is now expecting the texture to be populated.
+  [self expectFrame];
 }
 
 - (void)expectFrame {
@@ -117,10 +91,10 @@
   _displayLink.running = self.isPlaying || self.waitingForFrame;
 }
 
-- (void)seekTo:(int64_t)location completionHandler:(void (^)(BOOL))completionHandler {
+- (void)seekTo:(NSInteger)position completion:(void (^)(FlutterError *_Nullable))completion {
   CMTime previousCMTime = self.player.currentTime;
-  [super seekTo:location
-      completionHandler:^(BOOL completed) {
+  [super seekTo:position
+      completion:^(FlutterError *error) {
         if (CMTimeCompare(self.player.currentTime, previousCMTime) != 0) {
           // Ensure that a frame is drawn once available, even if currently paused. In theory a
           // race is possible here where the new frame has already drawn by the time this code
@@ -131,32 +105,19 @@
           [self expectFrame];
         }
 
-        if (completionHandler) {
-          completionHandler(completed);
+        if (completion) {
+          completion(error);
         }
       }];
 }
 
-- (void)disposeSansEventChannel {
-  // This check prevents the crash caused by removing the KVO observers twice.
-  // When performing a Hot Restart, the leftover players are disposed once directly
-  // by [FVPVideoPlayerPlugin initialize:] method and then disposed again by
-  // [FVPVideoPlayer onTextureUnregistered:] call leading to possible over-release.
-  if (self.disposed) {
-    return;
-  }
-
-  [super disposeSansEventChannel];
+- (void)disposeWithError:(FlutterError *_Nullable *_Nonnull)error {
+  [super disposeWithError:error];
 
   [self.playerLayer removeFromSuperlayer];
 
+  _displayLink.running = NO;
   _displayLink = nil;
-}
-
-- (void)dispose {
-  [super dispose];
-
-  _onDisposed(self.frameUpdater.textureIdentifier);
 }
 
 #pragma mark - FlutterTexture
@@ -181,9 +142,10 @@
   self.targetTime += duration;
 
   CVPixelBufferRef buffer = NULL;
-  CMTime outputItemTime = [self.videoOutput itemTimeForHostTime:self.targetTime];
-  if ([self.videoOutput hasNewPixelBufferForItemTime:outputItemTime]) {
-    buffer = [self.videoOutput copyPixelBufferForItemTime:outputItemTime itemTimeForDisplay:NULL];
+  CMTime outputItemTime = [self.pixelBufferSource itemTimeForHostTime:self.targetTime];
+  if ([self.pixelBufferSource hasNewPixelBufferForItemTime:outputItemTime]) {
+    buffer = [self.pixelBufferSource copyPixelBufferForItemTime:outputItemTime
+                                             itemTimeForDisplay:NULL];
     if (buffer) {
       // Balance the owned reference from copyPixelBufferForItemTime.
       CVBufferRelease(self.latestPixelBuffer);
@@ -247,7 +209,8 @@
 - (void)onTextureUnregistered:(NSObject<FlutterTexture> *)texture {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (!self.disposed) {
-      [self dispose];
+      FlutterError *error;
+      [self disposeWithError:&error];
     }
   });
 }

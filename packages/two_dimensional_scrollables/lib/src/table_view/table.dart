@@ -1,8 +1,7 @@
-// Copyright 2013 The Flutter Authors. All rights reserved.
+// Copyright 2013 The Flutter Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import 'dart:collection';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -117,6 +116,7 @@ class TableView extends TwoDimensionalScrollView {
     super.dragStartBehavior,
     super.keyboardDismissBehavior,
     super.clipBehavior,
+    this.alignment = Alignment.topLeft,
   });
 
   /// Creates a [TableView] of widgets that are created on demand.
@@ -156,23 +156,24 @@ class TableView extends TwoDimensionalScrollView {
     required TableSpanBuilder columnBuilder,
     required TableSpanBuilder rowBuilder,
     required TableViewCellBuilder cellBuilder,
-  })  : assert(pinnedRowCount >= 0),
-        assert(rowCount == null || rowCount >= 0),
-        assert(rowCount == null || rowCount >= pinnedRowCount),
-        assert(columnCount == null || columnCount >= 0),
-        assert(pinnedColumnCount >= 0),
-        assert(columnCount == null || columnCount >= pinnedColumnCount),
-        super(
-          delegate: TableCellBuilderDelegate(
-            columnCount: columnCount,
-            rowCount: rowCount,
-            pinnedColumnCount: pinnedColumnCount,
-            pinnedRowCount: pinnedRowCount,
-            cellBuilder: cellBuilder,
-            columnBuilder: columnBuilder,
-            rowBuilder: rowBuilder,
-          ),
-        );
+    this.alignment = Alignment.topLeft,
+  }) : assert(pinnedRowCount >= 0),
+       assert(rowCount == null || rowCount >= 0),
+       assert(rowCount == null || rowCount >= pinnedRowCount),
+       assert(columnCount == null || columnCount >= 0),
+       assert(pinnedColumnCount >= 0),
+       assert(columnCount == null || columnCount >= pinnedColumnCount),
+       super(
+         delegate: TableCellBuilderDelegate(
+           columnCount: columnCount,
+           rowCount: rowCount,
+           pinnedColumnCount: pinnedColumnCount,
+           pinnedRowCount: pinnedRowCount,
+           cellBuilder: cellBuilder,
+           columnBuilder: columnBuilder,
+           rowBuilder: rowBuilder,
+         ),
+       );
 
   /// Creates a [TableView] from an explicit two dimensional array of children.
   ///
@@ -200,17 +201,23 @@ class TableView extends TwoDimensionalScrollView {
     required TableSpanBuilder columnBuilder,
     required TableSpanBuilder rowBuilder,
     List<List<TableViewCell>> cells = const <List<TableViewCell>>[],
-  })  : assert(pinnedRowCount >= 0),
-        assert(pinnedColumnCount >= 0),
-        super(
-          delegate: TableCellListDelegate(
-            pinnedColumnCount: pinnedColumnCount,
-            pinnedRowCount: pinnedRowCount,
-            cells: cells,
-            columnBuilder: columnBuilder,
-            rowBuilder: rowBuilder,
-          ),
-        );
+    this.alignment = Alignment.topLeft,
+  }) : assert(pinnedRowCount >= 0),
+       assert(pinnedColumnCount >= 0),
+       super(
+         delegate: TableCellListDelegate(
+           pinnedColumnCount: pinnedColumnCount,
+           pinnedRowCount: pinnedRowCount,
+           cells: cells,
+           columnBuilder: columnBuilder,
+           rowBuilder: rowBuilder,
+         ),
+       );
+
+  /// The alignment of the table within the viewport when there is extra space.
+  ///
+  /// Defaults to [Alignment.topLeft].
+  final AlignmentGeometry alignment;
 
   @override
   TableViewport buildViewport(
@@ -227,6 +234,7 @@ class TableView extends TwoDimensionalScrollView {
       mainAxis: mainAxis,
       cacheExtent: cacheExtent,
       clipBehavior: clipBehavior,
+      alignment: alignment,
     );
   }
 }
@@ -246,7 +254,11 @@ class TableViewport extends TwoDimensionalViewport {
     required super.mainAxis,
     super.cacheExtent,
     super.clipBehavior,
+    this.alignment = Alignment.topLeft,
   });
+
+  /// The alignment of the table within the viewport when there is extra space.
+  final AlignmentGeometry alignment;
 
   @override
   RenderTwoDimensionalViewport createRenderObject(BuildContext context) {
@@ -260,6 +272,8 @@ class TableViewport extends TwoDimensionalViewport {
       clipBehavior: clipBehavior,
       delegate: delegate as TableCellDelegateMixin,
       childManager: context as TwoDimensionalChildManager,
+      alignment: alignment,
+      textDirection: Directionality.maybeOf(context),
     );
   }
 
@@ -276,7 +290,9 @@ class TableViewport extends TwoDimensionalViewport {
       ..mainAxis = mainAxis
       ..cacheExtent = cacheExtent
       ..clipBehavior = clipBehavior
-      ..delegate = delegate as TableCellDelegateMixin;
+      ..delegate = delegate as TableCellDelegateMixin
+      ..alignment = alignment
+      ..textDirection = Directionality.maybeOf(context);
   }
 }
 
@@ -300,7 +316,10 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     required super.childManager,
     super.cacheExtent,
     super.clipBehavior,
-  });
+    AlignmentGeometry alignment = Alignment.topLeft,
+    TextDirection? textDirection,
+  }) : _alignment = alignment,
+       _textDirection = textDirection;
 
   @override
   TableCellDelegateMixin get delegate =>
@@ -309,6 +328,31 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
   set delegate(TableCellDelegateMixin value) {
     super.delegate = value;
   }
+
+  /// The alignment of the table within the viewport when there is extra space.
+  AlignmentGeometry get alignment => _alignment;
+  AlignmentGeometry _alignment;
+  set alignment(AlignmentGeometry value) {
+    if (_alignment == value) {
+      return;
+    }
+    _alignment = value;
+    markNeedsLayout();
+  }
+
+  /// The text direction with which to resolve [alignment].
+  TextDirection? get textDirection => _textDirection;
+  TextDirection? _textDirection;
+  set textDirection(TextDirection? value) {
+    if (_textDirection == value) {
+      return;
+    }
+    _textDirection = value;
+    markNeedsLayout();
+  }
+
+  double _hAlignmentOffset = 0.0;
+  double _vAlignmentOffset = 0.0;
 
   // Skipped vicinities for the current frame based on merged cells.
   // This prevents multiple build calls for the same cell that spans multiple
@@ -333,8 +377,17 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
 
   int? _columnNullTerminatedIndex;
   bool get _columnsAreInfinite => delegate.columnCount == null;
+  // Where column layout begins, potentially outside of the visible area.
+  double get _targetLeadingColumnPixel {
+    return clampDouble(
+      horizontalOffset.pixels - cacheExtent,
+      0,
+      double.infinity,
+    );
+  }
+
   // How far columns should be laid out in a given frame.
-  double get _targetColumnPixel {
+  double get _targetTrailingColumnPixel {
     return cacheExtent +
         horizontalOffset.pixels +
         viewportDimension.width -
@@ -343,8 +396,13 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
 
   int? _rowNullTerminatedIndex;
   bool get _rowsAreInfinite => delegate.rowCount == null;
+  // Where row layout begins, potentially outside of the visible area.
+  double get _targetLeadingRowPixel {
+    return clampDouble(verticalOffset.pixels - cacheExtent, 0, double.infinity);
+  }
+
   // How far rows should be laid out in a given frame.
-  double get _targetRowPixel {
+  double get _targetTrailingRowPixel {
     return cacheExtent +
         verticalOffset.pixels +
         viewportDimension.height -
@@ -371,13 +429,6 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     );
   }
 
-  // TODO(Piinks): Pinned rows/cols do not account for what is visible on the
-  //  screen. Ostensibly, we would not want to have pinned rows/columns that
-  //  extend beyond the viewport, we would never see them as they would never
-  //  scroll into view. So this currently implementation is fairly assuming
-  //  we will never have rows/cols that are outside of the viewport. We should
-  //  maybe add an assertion for this during layout.
-  // https://github.com/flutter/flutter/issues/136833
   int? get _lastPinnedRow =>
       delegate.pinnedRowCount > 0 ? delegate.pinnedRowCount - 1 : null;
   int? get _lastPinnedColumn =>
@@ -389,6 +440,49 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
   double get _pinnedColumnsExtent => _lastPinnedColumn != null
       ? _columnMetrics[_lastPinnedColumn]!.trailingOffset
       : 0.0;
+
+  void _debugCheckPinnedExtent() {
+    assert(() {
+      if (_pinnedColumnsExtent > viewportDimension.width) {
+        debugPrint(
+          'TableView has pinned columns with a total width of '
+          '$_pinnedColumnsExtent, which exceeds the viewport width of '
+          '${viewportDimension.width}. This will prevent unpinned columns '
+          'from being visible.',
+        );
+      } else if (_pinnedColumnsExtent == viewportDimension.width) {
+        final bool hasUnpinnedColumns =
+            delegate.columnCount == null ||
+            delegate.columnCount! > delegate.pinnedColumnCount;
+        if (hasUnpinnedColumns) {
+          debugPrint(
+            'TableView has pinned columns that fully consume the viewport width. '
+            'Unpinned columns will not be visible.',
+          );
+        }
+      }
+
+      if (_pinnedRowsExtent > viewportDimension.height) {
+        debugPrint(
+          'TableView has pinned rows with a total height of '
+          '$_pinnedRowsExtent, which exceeds the viewport height of '
+          '${viewportDimension.height}. This will prevent unpinned rows '
+          'from being visible.',
+        );
+      } else if (_pinnedRowsExtent == viewportDimension.height) {
+        final bool hasUnpinnedRows =
+            delegate.rowCount == null ||
+            delegate.rowCount! > delegate.pinnedRowCount;
+        if (hasUnpinnedRows) {
+          debugPrint(
+            'TableView has pinned rows that fully consume the viewport height. '
+            'Unpinned rows will not be visible.',
+          );
+        }
+      }
+      return true;
+    }());
+  }
 
   @override
   TableViewParentData parentDataOf(RenderBox child) =>
@@ -429,13 +523,15 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             );
             result.add(
               HitTestEntry(
-                  _columnMetrics[cellParentData.tableVicinity.column]!),
+                _columnMetrics[cellParentData.tableVicinity.column]!,
+              ),
             );
           case Axis.horizontal:
             // Column major order, columns go first.
             result.add(
               HitTestEntry(
-                  _columnMetrics[cellParentData.tableVicinity.column]!),
+                _columnMetrics[cellParentData.tableVicinity.column]!,
+              ),
             );
             result.add(
               HitTestEntry(_rowMetrics[cellParentData.tableVicinity.row]!),
@@ -463,8 +559,8 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       }
       return true;
     }());
-    double startOfRegularColumn = 0.0;
-    double startOfPinnedColumn = 0.0;
+    var startOfRegularColumn = 0.0;
+    var startOfPinnedColumn = 0.0;
     if (appendColumns) {
       // We are only adding to the metrics we already know, since we are lazily
       // compiling metrics. This should only be the case when the
@@ -479,8 +575,9 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     }
     // If we are computing up to a specific index, we are getting info for a
     // merged cell, do not change the visible cells.
-    _firstNonPinnedColumn =
-        toColumnIndex == null ? null : _firstNonPinnedColumn;
+    _firstNonPinnedColumn = toColumnIndex == null
+        ? null
+        : _firstNonPinnedColumn;
     _lastNonPinnedColumn = toColumnIndex == null ? null : _lastNonPinnedColumn;
     int column = appendColumns ? _columnMetrics.length : 0;
 
@@ -504,8 +601,9 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
 
     while (!reachedColumnEnd()) {
       final bool isPinned = column < delegate.pinnedColumnCount;
-      final double leadingOffset =
-          isPinned ? startOfPinnedColumn : startOfRegularColumn;
+      final leadingOffset = isPinned
+          ? startOfPinnedColumn
+          : startOfRegularColumn;
       _Span? span = _columnMetrics.remove(column);
       final TableSpan? configuration =
           span?.configuration ?? delegate.buildColumn(column);
@@ -535,11 +633,11 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       );
       _columnMetrics[column] = span;
       if (!isPinned) {
-        if (span.trailingOffset >= horizontalOffset.pixels &&
+        if (span.trailingOffset >= _targetLeadingColumnPixel &&
             _firstNonPinnedColumn == null) {
           _firstNonPinnedColumn = column;
         }
-        if (span.trailingOffset >= _targetColumnPixel &&
+        if (span.trailingOffset >= _targetTrailingColumnPixel &&
             _lastNonPinnedColumn == null) {
           _lastNonPinnedColumn = column;
         }
@@ -568,8 +666,8 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       }
       return true;
     }());
-    double startOfRegularRow = 0.0;
-    double startOfPinnedRow = 0.0;
+    var startOfRegularRow = 0.0;
+    var startOfPinnedRow = 0.0;
     if (appendRows) {
       // We are only adding to the metrics we already know, since we are lazily
       // compiling metrics. This should only be the case when the
@@ -605,8 +703,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
 
     while (!reachedRowEnd()) {
       final bool isPinned = row < delegate.pinnedRowCount;
-      final double leadingOffset =
-          isPinned ? startOfPinnedRow : startOfRegularRow;
+      final leadingOffset = isPinned ? startOfPinnedRow : startOfRegularRow;
       _Span? span = _rowMetrics.remove(row);
       final TableSpan? configuration =
           span?.configuration ?? delegate.buildRow(row);
@@ -637,11 +734,11 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       );
       _rowMetrics[row] = span;
       if (!isPinned) {
-        if (span.trailingOffset >= verticalOffset.pixels &&
+        if (span.trailingOffset >= _targetLeadingRowPixel &&
             _firstNonPinnedRow == null) {
           _firstNonPinnedRow = row;
         }
-        if (span.trailingOffset > _targetRowPixel &&
+        if (span.trailingOffset >= _targetTrailingRowPixel &&
             _lastNonPinnedRow == null) {
           _lastNonPinnedRow = row;
         }
@@ -709,10 +806,33 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             _pinnedRowsExtent,
       );
     }
-    return verticalOffset.applyContentDimensions(
-      0.0,
-      maxVerticalScrollExtent,
-    );
+    return verticalOffset.applyContentDimensions(0.0, maxVerticalScrollExtent);
+  }
+
+  /// Binary search to find the first index with [_Span] matching the condition.
+  /// [map]: Index-[_Span] map, [condition]: Match rule
+  /// Returns the first matched index or null if not found.
+  int? _binarySearchFirstFromMap(
+    Map<int, _Span> map,
+    bool Function(_Span) condition,
+  ) {
+    if (map.isEmpty) {
+      return null;
+    }
+    var low = 0;
+    int high = map.length - 1;
+    int? result;
+    while (low <= high) {
+      final int mid = low + ((high - low) >> 1);
+      final _Span span = map[mid]!;
+      if (condition(span)) {
+        result = mid;
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return result;
   }
 
   // Uses the cached metrics to update the currently visible cells. If the
@@ -723,63 +843,62 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     if (_columnMetrics.isNotEmpty) {
       _Span lastKnownColumn = _columnMetrics[_columnMetrics.length - 1]!;
       if (_columnsAreInfinite &&
-          lastKnownColumn.trailingOffset < _targetColumnPixel) {
+          lastKnownColumn.trailingOffset < _targetTrailingColumnPixel) {
         // This will add the column metrics we do not know about up to the
         // _targetColumnPixel, while keeping the ones we already know about.
         _updateColumnMetrics(appendColumns: true);
         lastKnownColumn = _columnMetrics[_columnMetrics.length - 1]!;
-        assert(_columnMetrics.length == delegate.columnCount ||
-            lastKnownColumn.trailingOffset >= _targetColumnPixel ||
-            _columnNullTerminatedIndex != null);
+        assert(
+          _columnMetrics.length == delegate.columnCount ||
+              lastKnownColumn.trailingOffset >= _targetTrailingColumnPixel ||
+              _columnNullTerminatedIndex != null,
+        );
       }
     }
     _firstNonPinnedColumn = null;
     _lastNonPinnedColumn = null;
-    for (int column = 0; column < _columnMetrics.length; column++) {
-      if (_columnMetrics[column]!.isPinned) {
-        continue;
-      }
-      final double endOfColumn = _columnMetrics[column]!.trailingOffset;
-      if (endOfColumn >= horizontalOffset.pixels &&
-          _firstNonPinnedColumn == null) {
-        _firstNonPinnedColumn = column;
-      }
-      if (endOfColumn >= _targetColumnPixel && _lastNonPinnedColumn == null) {
-        _lastNonPinnedColumn = column;
-        break;
-      }
-    }
+    // Binary search replaces for-loop to reduce computation.
+    _firstNonPinnedColumn = _binarySearchFirstFromMap(
+      _columnMetrics,
+      (span) =>
+          !span.isPinned && span.trailingOffset >= _targetLeadingColumnPixel,
+    );
+    _lastNonPinnedColumn = _binarySearchFirstFromMap(
+      _columnMetrics,
+      (span) =>
+          !span.isPinned && span.trailingOffset >= _targetTrailingColumnPixel,
+    );
     if (_firstNonPinnedColumn != null) {
       _lastNonPinnedColumn ??= _columnMetrics.length - 1;
     }
 
     if (_rowMetrics.isNotEmpty) {
       _Span lastKnownRow = _rowMetrics[_rowMetrics.length - 1]!;
-      if (_rowsAreInfinite && lastKnownRow.trailingOffset < _targetRowPixel) {
+      if (_rowsAreInfinite &&
+          lastKnownRow.trailingOffset < _targetTrailingRowPixel) {
         // This will add the row metrics we do not know about up to the
         // _targetRowPixel, while keeping the ones we already know about.
         _updateRowMetrics(appendRows: true);
         lastKnownRow = _rowMetrics[_rowMetrics.length - 1]!;
-        assert(_rowMetrics.length == delegate.rowCount ||
-            lastKnownRow.trailingOffset >= _targetRowPixel ||
-            _rowNullTerminatedIndex != null);
+        assert(
+          _rowMetrics.length == delegate.rowCount ||
+              lastKnownRow.trailingOffset >= _targetTrailingRowPixel ||
+              _rowNullTerminatedIndex != null,
+        );
       }
     }
     _firstNonPinnedRow = null;
     _lastNonPinnedRow = null;
-    for (int row = 0; row < _rowMetrics.length; row++) {
-      if (_rowMetrics[row]!.isPinned) {
-        continue;
-      }
-      final double endOfRow = _rowMetrics[row]!.trailingOffset;
-      if (endOfRow >= verticalOffset.pixels && _firstNonPinnedRow == null) {
-        _firstNonPinnedRow = row;
-      }
-      if (endOfRow >= _targetRowPixel && _lastNonPinnedRow == null) {
-        _lastNonPinnedRow = row;
-        break;
-      }
-    }
+    // Binary search replaces for-loop to reduce computation.
+    _firstNonPinnedRow = _binarySearchFirstFromMap(
+      _rowMetrics,
+      (span) => !span.isPinned && span.trailingOffset >= _targetLeadingRowPixel,
+    );
+    _lastNonPinnedRow = _binarySearchFirstFromMap(
+      _rowMetrics,
+      (span) =>
+          !span.isPinned && span.trailingOffset >= _targetTrailingRowPixel,
+    );
     if (_firstNonPinnedRow != null) {
       _lastNonPinnedRow ??= _rowMetrics.length - 1;
     }
@@ -809,9 +928,37 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       _updateColumnMetrics();
       _updateRowMetrics();
       _updateScrollBounds();
+      _debugCheckPinnedExtent();
     } else {
       // Updates the visible cells based on cached table metrics.
       _updateFirstAndLastVisibleCell();
+    }
+
+    final Alignment resolvedAlignment = alignment.resolve(textDirection);
+    _hAlignmentOffset = 0.0;
+    if (!_columnsAreInfinite && _columnMetrics.isNotEmpty) {
+      final double totalWidth =
+          _pinnedColumnsExtent +
+          _columnMetrics[delegate.columnCount! - 1]!.trailingOffset;
+      if (totalWidth < viewportDimension.width) {
+        _hAlignmentOffset =
+            (viewportDimension.width - totalWidth) *
+            (resolvedAlignment.x + 1.0) /
+            2.0;
+      }
+    }
+
+    _vAlignmentOffset = 0.0;
+    if (!_rowsAreInfinite && _rowMetrics.isNotEmpty) {
+      final double totalHeight =
+          _pinnedRowsExtent +
+          _rowMetrics[delegate.rowCount! - 1]!.trailingOffset;
+      if (totalHeight < viewportDimension.height) {
+        _vAlignmentOffset =
+            (viewportDimension.height - totalHeight) *
+            (resolvedAlignment.y + 1.0) /
+            2.0;
+      }
     }
 
     if (_firstNonPinnedCell == null &&
@@ -823,21 +970,22 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
 
     final double? offsetIntoColumn = _firstNonPinnedColumn != null
         ? horizontalOffset.pixels -
-            _columnMetrics[_firstNonPinnedColumn]!.leadingOffset -
-            _pinnedColumnsExtent
+              _columnMetrics[_firstNonPinnedColumn]!.leadingOffset -
+              _pinnedColumnsExtent -
+              _hAlignmentOffset
         : null;
     final double? offsetIntoRow = _firstNonPinnedRow != null
         ? verticalOffset.pixels -
-            _rowMetrics[_firstNonPinnedRow]!.leadingOffset -
-            _pinnedRowsExtent
+              _rowMetrics[_firstNonPinnedRow]!.leadingOffset -
+              _pinnedRowsExtent -
+              _vAlignmentOffset
         : null;
-
     if (_lastPinnedRow != null && _lastPinnedColumn != null) {
       // Layout cells that are contained in both pinned rows and columns
       _layoutCells(
         start: TableVicinity.zero,
         end: TableVicinity(column: _lastPinnedColumn!, row: _lastPinnedRow!),
-        offset: Offset.zero,
+        offset: Offset(-_hAlignmentOffset, -_vAlignmentOffset),
       );
     }
 
@@ -849,7 +997,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       _layoutCells(
         start: TableVicinity(column: _firstNonPinnedColumn!, row: 0),
         end: TableVicinity(column: _lastNonPinnedColumn!, row: _lastPinnedRow!),
-        offset: Offset(offsetIntoColumn!, 0),
+        offset: Offset(offsetIntoColumn!, -_vAlignmentOffset),
       );
     }
     if (_lastPinnedColumn != null && _firstNonPinnedRow != null) {
@@ -860,7 +1008,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       _layoutCells(
         start: TableVicinity(column: 0, row: _firstNonPinnedRow!),
         end: TableVicinity(column: _lastPinnedColumn!, row: _lastNonPinnedRow!),
-        offset: Offset(0, offsetIntoRow!),
+        offset: Offset(-_hAlignmentOffset, offsetIntoRow!),
       );
     }
     if (_firstNonPinnedCell != null) {
@@ -940,7 +1088,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
         double? mergedColumnOffset;
         columnOffset += colSpan.configuration.padding.leading;
 
-        final TableVicinity vicinity = TableVicinity(column: column, row: row);
+        final vicinity = TableVicinity(column: column, row: row);
         final RenderBox? cell = _mergedVicinities.keys.contains(vicinity)
             ? null
             : buildOrObtainChildFor(vicinity);
@@ -955,29 +1103,33 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             final int lastRow = cellParentData.rowMergeStart == null
                 ? row
                 : firstRow + cellParentData.rowMergeSpan! - 1;
-            assert(_debugCheckMergeBounds(
-              spanOrientation: 'Row',
-              currentSpan: row,
-              spanMergeStart: firstRow,
-              spanMergeEnd: lastRow,
-              spanCount: delegate.rowCount,
-              pinnedSpanCount: delegate.pinnedRowCount,
-              currentVicinity: vicinity,
-            ));
+            assert(
+              _debugCheckMergeBounds(
+                spanOrientation: 'Row',
+                currentSpan: row,
+                spanMergeStart: firstRow,
+                spanMergeEnd: lastRow,
+                spanCount: delegate.rowCount,
+                pinnedSpanCount: delegate.pinnedRowCount,
+                currentVicinity: vicinity,
+              ),
+            );
 
             final int firstColumn = cellParentData.columnMergeStart ?? column;
             final int lastColumn = cellParentData.columnMergeStart == null
                 ? column
                 : firstColumn + cellParentData.columnMergeSpan! - 1;
-            assert(_debugCheckMergeBounds(
-              spanOrientation: 'Column',
-              currentSpan: column,
-              spanMergeStart: firstColumn,
-              spanMergeEnd: lastColumn,
-              spanCount: delegate.columnCount,
-              pinnedSpanCount: delegate.pinnedColumnCount,
-              currentVicinity: vicinity,
-            ));
+            assert(
+              _debugCheckMergeBounds(
+                spanOrientation: 'Column',
+                currentSpan: column,
+                spanMergeStart: firstColumn,
+                spanMergeEnd: lastColumn,
+                spanCount: delegate.columnCount,
+                pinnedSpanCount: delegate.pinnedColumnCount,
+                currentVicinity: vicinity,
+              ),
+            );
 
             // Leading padding on the leading cell, and trailing padding on the
             // trailing cell should be excluded. Interim leading/trailing
@@ -990,20 +1142,23 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             //       | <--------- extent of merged cell ---------> |
 
             // Compute height and layout offset for merged rows.
-            final bool rowIsInPinnedColumn = _lastPinnedColumn != null &&
+            final bool rowIsInPinnedColumn =
+                _lastPinnedColumn != null &&
                 vicinity.column <= _lastPinnedColumn!;
             final bool rowIsPinned =
                 _lastPinnedRow != null && firstRow <= _lastPinnedRow!;
-            final double baseRowOffset =
-                switch ((rowIsInPinnedColumn, rowIsPinned)) {
+            final double baseRowOffset = switch ((
+              rowIsInPinnedColumn,
+              rowIsPinned,
+            )) {
               // Both row and column are pinned at this cell, or just pinned row.
               (true, true) || (false, true) => 0.0,
               // Cell is within a pinned column, or no pinned area at all.
               (true, false) ||
-              (false, false) =>
-                _pinnedRowsExtent - verticalOffset.pixels,
+              (false, false) => _pinnedRowsExtent - verticalOffset.pixels,
             };
-            mergedRowOffset = baseRowOffset +
+            mergedRowOffset =
+                baseRowOffset +
                 _rowMetrics[firstRow]!.leadingOffset +
                 _rowMetrics[firstRow]!.configuration.padding.leading;
             if (_rowsAreInfinite && _rowMetrics[lastRow] == null) {
@@ -1019,7 +1174,8 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
               'null, signifying the end, at row $_rowNullTerminatedIndex but the '
               'merged cell is configured to end with row $lastRow.',
             );
-            mergedRowHeight = _rowMetrics[lastRow]!.trailingOffset -
+            mergedRowHeight =
+                _rowMetrics[lastRow]!.trailingOffset -
                 _rowMetrics[firstRow]!.leadingOffset -
                 _rowMetrics[lastRow]!.configuration.padding.trailing -
                 _rowMetrics[firstRow]!.configuration.padding.leading;
@@ -1028,16 +1184,18 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
                 _lastPinnedRow != null && vicinity.row <= _lastPinnedRow!;
             final bool columnIsPinned =
                 _lastPinnedColumn != null && firstColumn <= _lastPinnedColumn!;
-            final double baseColumnOffset =
-                switch ((columnIsInPinnedRow, columnIsPinned)) {
+            final double baseColumnOffset = switch ((
+              columnIsInPinnedRow,
+              columnIsPinned,
+            )) {
               // Both row and column are pinned at this cell, or just pinned column.
               (true, true) || (false, true) => 0.0,
               // Cell is within a pinned row, or no pinned area at all.
               (true, false) ||
-              (false, false) =>
-                _pinnedColumnsExtent - horizontalOffset.pixels,
+              (false, false) => _pinnedColumnsExtent - horizontalOffset.pixels,
             };
-            mergedColumnOffset = baseColumnOffset +
+            mergedColumnOffset =
+                baseColumnOffset +
                 _columnMetrics[firstColumn]!.leadingOffset +
                 _columnMetrics[firstColumn]!.configuration.padding.leading;
 
@@ -1057,23 +1215,24 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
               'null, signifying the end, at column $_columnNullTerminatedIndex but '
               'the merged cell is configured to end with column $lastColumn.',
             );
-            mergedColumnWidth = _columnMetrics[lastColumn]!.trailingOffset -
+            mergedColumnWidth =
+                _columnMetrics[lastColumn]!.trailingOffset -
                 _columnMetrics[firstColumn]!.leadingOffset -
                 _columnMetrics[lastColumn]!.configuration.padding.trailing -
                 _columnMetrics[firstColumn]!.configuration.padding.leading;
 
             // Collect all of the vicinities that will not need to be built now.
-            int currentRow = firstRow;
+            var currentRow = firstRow;
             while (currentRow <= lastRow) {
               if (cellParentData.rowMergeStart != null) {
                 _mergedRows.add(currentRow);
               }
-              int currentColumn = firstColumn;
+              var currentColumn = firstColumn;
               while (currentColumn <= lastColumn) {
                 if (cellParentData.columnMergeStart != null) {
                   _mergedColumns.add(currentColumn);
                 }
-                final TableVicinity key = TableVicinity(
+                final key = TableVicinity(
                   row: currentRow,
                   column: currentColumn,
                 );
@@ -1084,7 +1243,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             }
           }
 
-          final BoxConstraints cellConstraints = BoxConstraints.tightFor(
+          final cellConstraints = BoxConstraints.tightFor(
             width: mergedColumnWidth ?? standardColumnWidth,
             height: mergedRowHeight ?? standardRowHeight,
           );
@@ -1098,7 +1257,8 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           mergedColumnOffset = null;
           mergedColumnWidth = null;
         }
-        columnOffset += standardColumnWidth +
+        columnOffset +=
+            standardColumnWidth +
             _columnMetrics[column]!.configuration.padding.trailing;
       }
       rowOffset +=
@@ -1127,6 +1287,9 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     // follows row or column major ordering. Here is slightly different
     // as we break the cells up into 4 main paint passes to clip for overlap.
 
+    final bool reversedH = axisDirectionIsReversed(horizontalAxisDirection);
+    final bool reversedV = axisDirectionIsReversed(verticalAxisDirection);
+
     if (_firstNonPinnedCell != null) {
       // Paint all visible un-pinned cells
       assert(_lastNonPinnedCell != null);
@@ -1134,12 +1297,10 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
         needsCompositing,
         offset,
         Rect.fromLTWH(
-          axisDirectionIsReversed(horizontalAxisDirection)
-              ? 0.0
-              : _pinnedColumnsExtent,
-          axisDirectionIsReversed(verticalAxisDirection)
-              ? 0.0
-              : _pinnedRowsExtent,
+          (reversedH ? 0.0 : _pinnedColumnsExtent) +
+              (reversedH ? -_hAlignmentOffset : _hAlignmentOffset),
+          (reversedV ? 0.0 : _pinnedRowsExtent) +
+              (reversedV ? -_vAlignmentOffset : _vAlignmentOffset),
           viewportDimension.width - _pinnedColumnsExtent,
           viewportDimension.height - _pinnedRowsExtent,
         ),
@@ -1165,12 +1326,13 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
         needsCompositing,
         offset,
         Rect.fromLTWH(
-          axisDirectionIsReversed(horizontalAxisDirection)
-              ? viewportDimension.width - _pinnedColumnsExtent
-              : 0.0,
-          axisDirectionIsReversed(verticalAxisDirection)
-              ? 0.0
-              : _pinnedRowsExtent,
+          reversedH
+              ? viewportDimension.width -
+                    _pinnedColumnsExtent -
+                    _hAlignmentOffset
+              : _hAlignmentOffset,
+          (reversedV ? 0.0 : _pinnedRowsExtent) +
+              (reversedV ? -_vAlignmentOffset : _vAlignmentOffset),
           _pinnedColumnsExtent,
           viewportDimension.height - _pinnedRowsExtent,
         ),
@@ -1180,7 +1342,9 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
             offset: offset,
             leadingVicinity: TableVicinity(column: 0, row: _firstNonPinnedRow!),
             trailingVicinity: TableVicinity(
-                column: _lastPinnedColumn!, row: _lastNonPinnedRow!),
+              column: _lastPinnedColumn!,
+              row: _lastNonPinnedRow!,
+            ),
           );
         },
         clipBehavior: clipBehavior,
@@ -1197,12 +1361,11 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
         needsCompositing,
         offset,
         Rect.fromLTWH(
-          axisDirectionIsReversed(horizontalAxisDirection)
-              ? 0.0
-              : _pinnedColumnsExtent,
-          axisDirectionIsReversed(verticalAxisDirection)
-              ? viewportDimension.height - _pinnedRowsExtent
-              : 0.0,
+          (reversedH ? 0.0 : _pinnedColumnsExtent) +
+              (reversedH ? -_hAlignmentOffset : _hAlignmentOffset),
+          reversedV
+              ? viewportDimension.height - _pinnedRowsExtent - _vAlignmentOffset
+              : _vAlignmentOffset,
           viewportDimension.width - _pinnedColumnsExtent,
           _pinnedRowsExtent,
         ),
@@ -1210,10 +1373,14 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           _paintCells(
             context: context,
             offset: offset,
-            leadingVicinity:
-                TableVicinity(column: _firstNonPinnedColumn!, row: 0),
+            leadingVicinity: TableVicinity(
+              column: _firstNonPinnedColumn!,
+              row: 0,
+            ),
             trailingVicinity: TableVicinity(
-                column: _lastNonPinnedColumn!, row: _lastPinnedRow!),
+              column: _lastNonPinnedColumn!,
+              row: _lastPinnedRow!,
+            ),
           );
         },
         clipBehavior: clipBehavior,
@@ -1230,8 +1397,10 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
         context: context,
         offset: offset,
         leadingVicinity: TableVicinity.zero,
-        trailingVicinity:
-            TableVicinity(column: _lastPinnedColumn!, row: _lastPinnedRow!),
+        trailingVicinity: TableVicinity(
+          column: _lastPinnedColumn!,
+          row: _lastPinnedRow!,
+        ),
       );
     }
   }
@@ -1276,32 +1445,28 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     required Offset offset,
   }) {
     // Column decorations
-    final LinkedHashMap<Rect, TableSpanDecoration> foregroundColumns =
-        LinkedHashMap<Rect, TableSpanDecoration>();
-    final LinkedHashMap<Rect, TableSpanDecoration> backgroundColumns =
-        LinkedHashMap<Rect, TableSpanDecoration>();
+    final foregroundColumns = <Rect, TableSpanDecoration>{};
+    final backgroundColumns = <Rect, TableSpanDecoration>{};
 
-    final TableSpan rowSpan = _rowMetrics[leadingVicinity.row]!.configuration;
-    for (int column = leadingVicinity.column;
-        column <= trailingVicinity.column;
-        column++) {
+    for (
+      int column = leadingVicinity.column;
+      column <= trailingVicinity.column;
+      column++
+    ) {
       TableSpan columnSpan = _columnMetrics[column]!.configuration;
       if (columnSpan.backgroundDecoration != null ||
           columnSpan.foregroundDecoration != null ||
           _mergedColumns.contains(column)) {
-        final List<({RenderBox leading, RenderBox trailing})> decorationCells =
-            <({RenderBox leading, RenderBox trailing})>[];
+        final decorationCells = <({RenderBox leading, RenderBox trailing})>[];
         if (_mergedColumns.isEmpty || !_mergedColumns.contains(column)) {
           // One decoration across the whole column.
           decorationCells.add((
-            leading: getChildFor(TableVicinity(
-              column: column,
-              row: leadingVicinity.row,
-            ))!,
-            trailing: getChildFor(TableVicinity(
-              column: column,
-              row: trailingVicinity.row,
-            ))!,
+            leading: getChildFor(
+              TableVicinity(column: column, row: leadingVicinity.row),
+            )!,
+            trailing: getChildFor(
+              TableVicinity(column: column, row: trailingVicinity.row),
+            )!,
           ));
         } else {
           // Walk through the rows to separate merged cells for decorating. A
@@ -1320,10 +1485,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           late RenderBox trailingCell;
           int currentRow = leadingVicinity.row;
           while (currentRow <= trailingVicinity.row) {
-            TableVicinity vicinity = TableVicinity(
-              column: column,
-              row: currentRow,
-            );
+            var vicinity = TableVicinity(column: column, row: currentRow);
             leadingCell = getChildFor(vicinity)!;
             if (parentDataOf(leadingCell).columnMergeStart != null) {
               // Merged portion decorated individually since it exceeds the
@@ -1355,10 +1517,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
                 mapMergedVicinityToCanonicalChild: false,
               );
             }
-            decorationCells.add((
-              leading: leadingCell,
-              trailing: trailingCell,
-            ));
+            decorationCells.add((leading: leadingCell, trailing: trailingCell));
           }
         }
 
@@ -1367,35 +1526,53 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           required RenderBox trailingCell,
           required bool consumePadding,
         }) {
-          final ({double leading, double trailing}) offsetCorrection =
-              axisDirectionIsReversed(verticalAxisDirection)
-                  ? (
-                      leading: leadingCell.size.height,
-                      trailing: trailingCell.size.height,
-                    )
-                  : (leading: 0.0, trailing: 0.0);
-          return Rect.fromPoints(
-            parentDataOf(leadingCell).paintOffset! +
-                offset -
-                Offset(
-                  consumePadding ? columnSpan.padding.leading : 0.0,
-                  rowSpan.padding.leading - offsetCorrection.leading,
-                ),
-            parentDataOf(trailingCell).paintOffset! +
-                offset +
-                Offset(trailingCell.size.width, trailingCell.size.height) +
-                Offset(
-                  consumePadding ? columnSpan.padding.trailing : 0.0,
-                  rowSpan.padding.trailing - offsetCorrection.trailing,
-                ),
+          final bool reversedH = axisDirectionIsReversed(
+            horizontalAxisDirection,
+          );
+          final bool reversedV = axisDirectionIsReversed(verticalAxisDirection);
+          final TableSpan leadingRowSpan =
+              _rowMetrics[parentDataOf(leadingCell).tableVicinity.row]!
+                  .configuration;
+          final TableSpan trailingRowSpan =
+              _rowMetrics[parentDataOf(trailingCell).tableVicinity.row]!
+                  .configuration;
+
+          final double leftExpansion = consumePadding
+              ? (reversedH
+                    ? columnSpan.padding.trailing
+                    : columnSpan.padding.leading)
+              : 0.0;
+          final double rightExpansion = consumePadding
+              ? (reversedH
+                    ? columnSpan.padding.leading
+                    : columnSpan.padding.trailing)
+              : 0.0;
+          final double topExpansion = reversedV
+              ? trailingRowSpan.padding.trailing
+              : leadingRowSpan.padding.leading;
+          final double bottomExpansion = reversedV
+              ? leadingRowSpan.padding.leading
+              : trailingRowSpan.padding.trailing;
+
+          final Offset p1 = parentDataOf(leadingCell).paintOffset! + offset;
+          final Offset p2 =
+              parentDataOf(trailingCell).paintOffset! +
+              offset +
+              Offset(trailingCell.size.width, trailingCell.size.height);
+
+          return Rect.fromLTRB(
+            math.min(p1.dx, p2.dx - trailingCell.size.width) - leftExpansion,
+            math.min(p1.dy, p2.dy - trailingCell.size.height) - topExpansion,
+            math.max(p1.dx + leadingCell.size.width, p2.dx) + rightExpansion,
+            math.max(p1.dy + leadingCell.size.height, p2.dy) + bottomExpansion,
           );
         }
 
-        for (final ({RenderBox leading, RenderBox trailing}) cell
-            in decorationCells) {
+        for (final cell in decorationCells) {
           // If this was a merged cell, the decoration is defined by the leading
           // cell, which may come from a different column.
-          final int columnIndex = parentDataOf(cell.leading).columnMergeStart ??
+          final int columnIndex =
+              parentDataOf(cell.leading).columnMergeStart ??
               parentDataOf(cell.leading).tableVicinity.column;
           columnSpan = _columnMetrics[columnIndex]!.configuration;
           if (columnSpan.backgroundDecoration != null) {
@@ -1421,30 +1598,23 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
     }
 
     // Row decorations
-    final LinkedHashMap<Rect, TableSpanDecoration> foregroundRows =
-        LinkedHashMap<Rect, TableSpanDecoration>();
-    final LinkedHashMap<Rect, TableSpanDecoration> backgroundRows =
-        LinkedHashMap<Rect, TableSpanDecoration>();
-    final TableSpan columnSpan =
-        _columnMetrics[leadingVicinity.column]!.configuration;
+    final foregroundRows = <Rect, TableSpanDecoration>{};
+    final backgroundRows = <Rect, TableSpanDecoration>{};
     for (int row = leadingVicinity.row; row <= trailingVicinity.row; row++) {
       TableSpan rowSpan = _rowMetrics[row]!.configuration;
       if (rowSpan.backgroundDecoration != null ||
           rowSpan.foregroundDecoration != null ||
           _mergedRows.contains(row)) {
-        final List<({RenderBox leading, RenderBox trailing})> decorationCells =
-            <({RenderBox leading, RenderBox trailing})>[];
+        final decorationCells = <({RenderBox leading, RenderBox trailing})>[];
         if (_mergedRows.isEmpty || !_mergedRows.contains(row)) {
           // One decoration across the whole row.
           decorationCells.add((
-            leading: getChildFor(TableVicinity(
-              column: leadingVicinity.column,
-              row: row,
-            ))!, // leading
-            trailing: getChildFor(TableVicinity(
-              column: trailingVicinity.column,
-              row: row,
-            ))!, // trailing
+            leading: getChildFor(
+              TableVicinity(column: leadingVicinity.column, row: row),
+            )!, // leading
+            trailing: getChildFor(
+              TableVicinity(column: trailingVicinity.column, row: row),
+            )!, // trailing
           ));
         } else {
           // Walk through the columns to separate merged cells for decorating. A
@@ -1463,10 +1633,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           late RenderBox trailingCell;
           int currentColumn = leadingVicinity.column;
           while (currentColumn <= trailingVicinity.column) {
-            TableVicinity vicinity = TableVicinity(
-              column: currentColumn,
-              row: row,
-            );
+            var vicinity = TableVicinity(column: currentColumn, row: row);
             leadingCell = getChildFor(vicinity)!;
             if (parentDataOf(leadingCell).rowMergeStart != null) {
               // Merged portion decorated individually since it exceeds the
@@ -1498,10 +1665,7 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
                 mapMergedVicinityToCanonicalChild: false,
               );
             }
-            decorationCells.add((
-              leading: leadingCell,
-              trailing: trailingCell,
-            ));
+            decorationCells.add((leading: leadingCell, trailing: trailingCell));
           }
         }
 
@@ -1510,35 +1674,49 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
           required RenderBox trailingCell,
           required bool consumePadding,
         }) {
-          final ({double leading, double trailing}) offsetCorrection =
-              axisDirectionIsReversed(horizontalAxisDirection)
-                  ? (
-                      leading: leadingCell.size.width,
-                      trailing: trailingCell.size.width,
-                    )
-                  : (leading: 0.0, trailing: 0.0);
-          return Rect.fromPoints(
-            parentDataOf(leadingCell).paintOffset! +
-                offset -
-                Offset(
-                  columnSpan.padding.leading - offsetCorrection.leading,
-                  consumePadding ? rowSpan.padding.leading : 0.0,
-                ),
-            parentDataOf(trailingCell).paintOffset! +
-                offset +
-                Offset(trailingCell.size.width, trailingCell.size.height) +
-                Offset(
-                  columnSpan.padding.leading - offsetCorrection.trailing,
-                  consumePadding ? rowSpan.padding.trailing : 0.0,
-                ),
+          final bool reversedH = axisDirectionIsReversed(
+            horizontalAxisDirection,
+          );
+          final bool reversedV = axisDirectionIsReversed(verticalAxisDirection);
+          final TableSpan leadingColSpan =
+              _columnMetrics[parentDataOf(leadingCell).tableVicinity.column]!
+                  .configuration;
+          final TableSpan trailingColSpan =
+              _columnMetrics[parentDataOf(trailingCell).tableVicinity.column]!
+                  .configuration;
+
+          final double leftExpansion = reversedH
+              ? trailingColSpan.padding.trailing
+              : leadingColSpan.padding.leading;
+          final double rightExpansion = reversedH
+              ? leadingColSpan.padding.leading
+              : trailingColSpan.padding.trailing;
+          final double topExpansion = consumePadding
+              ? (reversedV ? rowSpan.padding.trailing : rowSpan.padding.leading)
+              : 0.0;
+          final double bottomExpansion = consumePadding
+              ? (reversedV ? rowSpan.padding.leading : rowSpan.padding.trailing)
+              : 0.0;
+
+          final Offset p1 = parentDataOf(leadingCell).paintOffset! + offset;
+          final Offset p2 =
+              parentDataOf(trailingCell).paintOffset! +
+              offset +
+              Offset(trailingCell.size.width, trailingCell.size.height);
+
+          return Rect.fromLTRB(
+            math.min(p1.dx, p2.dx - trailingCell.size.width) - leftExpansion,
+            math.min(p1.dy, p2.dy - trailingCell.size.height) - topExpansion,
+            math.max(p1.dx + leadingCell.size.width, p2.dx) + rightExpansion,
+            math.max(p1.dy + leadingCell.size.height, p2.dy) + bottomExpansion,
           );
         }
 
-        for (final ({RenderBox leading, RenderBox trailing}) cell
-            in decorationCells) {
+        for (final cell in decorationCells) {
           // If this was a merged cell, the decoration is defined by the leading
           // cell, which may come from a different row.
-          final int rowIndex = parentDataOf(cell.leading).rowMergeStart ??
+          final int rowIndex =
+              parentDataOf(cell.leading).rowMergeStart ??
               parentDataOf(cell.trailing).tableVicinity.row;
           rowSpan = _rowMetrics[rowIndex]!.configuration;
           if (rowSpan.backgroundDecoration != null) {
@@ -1571,51 +1749,53 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       // Default, row major order. Rows go first.
       case Axis.vertical:
         backgroundRows.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: horizontalAxisDirection,
+            crossAxisDirection: verticalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
         backgroundColumns.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: verticalAxisDirection,
+            crossAxisDirection: horizontalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
       // Column major order. Columns go first.
       case Axis.horizontal:
         backgroundColumns.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: verticalAxisDirection,
+            crossAxisDirection: horizontalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
         backgroundRows.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: horizontalAxisDirection,
+            crossAxisDirection: verticalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
     }
 
     // Cells
-    for (int column = leadingVicinity.column;
-        column <= trailingVicinity.column;
-        column++) {
+    for (
+      int column = leadingVicinity.column;
+      column <= trailingVicinity.column;
+      column++
+    ) {
       for (int row = leadingVicinity.row; row <= trailingVicinity.row; row++) {
-        final TableVicinity vicinity = TableVicinity(column: column, row: row);
+        final vicinity = TableVicinity(column: column, row: row);
         final RenderBox? cell = getChildFor(
           vicinity,
           mapMergedVicinityToCanonicalChild: false,
@@ -1643,40 +1823,40 @@ class RenderTableViewport extends RenderTwoDimensionalViewport {
       // Default, row major order. Rows go first.
       case Axis.vertical:
         foregroundRows.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: horizontalAxisDirection,
+            crossAxisDirection: verticalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
         foregroundColumns.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: verticalAxisDirection,
+            crossAxisDirection: horizontalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
       // Column major order. Columns go first.
       case Axis.horizontal:
         foregroundColumns.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: verticalAxisDirection,
+            crossAxisDirection: horizontalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
         foregroundRows.forEach((Rect rect, TableSpanDecoration decoration) {
-          final TableSpanDecorationPaintDetails paintingDetails =
-              TableSpanDecorationPaintDetails(
+          final paintingDetails = TableSpanDecorationPaintDetails(
             canvas: context.canvas,
             rect: rect,
             axisDirection: horizontalAxisDirection,
+            crossAxisDirection: verticalAxisDirection,
           );
           decoration.paint(paintingDetails);
         });
@@ -1754,11 +1934,11 @@ class _Span
       _disposeRecognizers();
       return;
     }
-    final Map<Type, GestureRecognizer> newRecognizers =
-        <Type, GestureRecognizer>{};
+    final newRecognizers = <Type, GestureRecognizer>{};
     for (final Type type in configuration.recognizerFactories.keys) {
       assert(!newRecognizers.containsKey(type));
-      newRecognizers[type] = _recognizers?.remove(type) ??
+      newRecognizers[type] =
+          _recognizers?.remove(type) ??
           configuration.recognizerFactories[type]!.constructor();
       assert(
         newRecognizers[type].runtimeType == type,
@@ -1767,8 +1947,9 @@ class _Span
         'GestureRecognizerFactory must be specialized with the type of the '
         'class that it returns from its constructor method.',
       );
-      configuration.recognizerFactories[type]!
-          .initializer(newRecognizers[type]!);
+      configuration.recognizerFactories[type]!.initializer(
+        newRecognizers[type]!,
+      );
     }
     _disposeRecognizers(); // only disposes the ones that where not re-used above.
     _recognizers = newRecognizers;
